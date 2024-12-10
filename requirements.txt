@@ -1,0 +1,6 @@
+yt-dlp
+ffmpeg-python
+google-cloud-speech
+google-cloud-storage
+flask
+nltk
