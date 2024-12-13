@@ -107,4 +107,6 @@ def responder():
         return jsonify({"erro": str(e)}), 500
 
 # Inicialização do servidor
-if __name__ == '__main__'
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+
