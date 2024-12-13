@@ -1,5 +1,5 @@
-import json
 import os
+import json
 import subprocess
 from flask import Flask, request, jsonify
 from google.cloud import storage, speech
@@ -8,16 +8,8 @@ import yt_dlp
 import nltk
 import requests
 
-# Download de recursos NLTK
-nltk.download('punkt')
-nltk.download('stopwords')
-
 # Configurações do Google Cloud
-service_account_info = os.getenv("GOOGLE_CREDENTIALS")  # Use o nome correto da variável
-if not service_account_info:
-    raise ValueError("A variável de ambiente 'GOOGLE_CREDENTIALS' não foi configurada corretamente.")
-
-service_account_info = json.loads(service_account_info)  # Carregue o JSON
+service_account_info = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
 CREDENTIALS = service_account.Credentials.from_service_account_info(service_account_info)
 STORAGE_CLIENT = storage.Client(credentials=CREDENTIALS)
 SPEECH_CLIENT = speech.SpeechClient(credentials=CREDENTIALS)
@@ -31,9 +23,11 @@ HF_TOKEN = "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"
 
 # Função: Download do áudio do YouTube
 def download_audio(video_url):
+    """Faz download do áudio de um vídeo do YouTube utilizando yt_dlp e cookies."""
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': '%(title)s.%(ext)s',
+        'cookies': 'cookies.txt'  # Usa o arquivo de cookies
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info_dict = ydl.extract_info(video_url, download=True)
@@ -62,7 +56,7 @@ def upload_to_gcs(bucket_name, source_file, destination_blob):
 
 # Função: Transcrição do áudio
 def transcribe_audio(audio_file_path, language_code="pt-BR"):
-    """Transcreve o áudio a partir de um arquivo local, com suporte para múltiplos idiomas."""
+    """Transcreve o áudio a partir de um arquivo local."""
     gcs_uri = upload_to_gcs(BUCKET_NAME, audio_file_path, os.path.basename(audio_file_path))
     audio = speech.RecognitionAudio(uri=gcs_uri)
     config = speech.RecognitionConfig(
@@ -75,48 +69,12 @@ def transcribe_audio(audio_file_path, language_code="pt-BR"):
     transcript = " ".join(result.alternatives[0].transcript for result in response.results)
     return transcript
 
-# Função: Dividir texto em partes menores
-def dividir_texto(texto, limite=1024):
-    """Divide o texto em partes menores para enviar à API caso exceda o limite."""
-    palavras = texto.split()
-    for i in range(0, len(palavras), limite):
-        yield " ".join(palavras[i:i + limite])
-
-# Função: Resumo automático via API Hugging Face
-def gerar_resumo_hf(texto):
-    """Gera um resumo do texto transcrito usando a API do Hugging Face."""
-    API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-
-    resumos = []
-    for parte in dividir_texto(texto):
-        payload = {"inputs": parte}
-        response = requests.post(API_URL, headers=headers, json=payload)
-
-        if response.status_code == 200:
-            data = response.json()
-            resumos.append(data[0]["summary_text"])
-        else:
-            raise Exception(f"Erro ao usar a API do Hugging Face: {response.status_code} - {response.text}")
-
-    return " ".join(resumos)
-
 # Função: Processar perguntas
 def processar_pergunta(transcricao, pergunta):
-    pergunta = pergunta.lower().strip()
-
-    # Dicionário com as perguntas e respostas
-    respostas = {
+    perguntas = {  # Dicionário de respostas simplificado
         "quantas palavras tem o vídeo": f"A transcrição contém {len(transcricao.split())} palavras.",
-        "resumo": "Desculpe, resumo não disponível no momento."
     }
-
-    # Verificar se a pergunta está contida no dicionário
-    for chave, resposta in respostas.items():
-        if chave in pergunta:
-            return resposta
-
-    return "Desculpe, não consegui encontrar uma resposta para sua pergunta."
+    return perguntas.get(pergunta.lower(), "Desculpe, não consegui encontrar uma resposta para sua pergunta.")
 
 # Rota para perguntas e respostas
 @app.route('/pergunta', methods=['POST'])
@@ -124,7 +82,6 @@ def responder():
     dados = request.json
     pergunta = dados.get('pergunta')
     video_url = dados.get('video_url')
-    language_code = dados.get('language_code', 'pt-BR')  # Idioma padrão é português
 
     if not pergunta or not video_url:
         return jsonify({"erro": "Pergunta ou URL do vídeo não fornecida"}), 400
@@ -137,13 +94,10 @@ def responder():
         wav_file = convert_to_wav(audio_file)
 
         # Etapa 3: Transcrição do áudio
-        transcricao = transcribe_audio(wav_file, language_code)
+        transcricao = transcribe_audio(wav_file)
 
-        # Etapa 4: Processar a pergunta ou gerar resumo
-        if pergunta == "resumo":
-            resposta = gerar_resumo_hf(transcricao)
-        else:
-            resposta = processar_pergunta(transcricao, pergunta)
+        # Etapa 4: Processar a pergunta
+        resposta = processar_pergunta(transcricao, pergunta)
 
         return jsonify({"resposta": resposta})
 
