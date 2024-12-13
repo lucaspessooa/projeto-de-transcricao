@@ -1,5 +1,5 @@
-import os
 import json
+import os
 import subprocess
 from flask import Flask, request, jsonify
 from google.cloud import storage, speech
@@ -9,7 +9,7 @@ import nltk
 import requests
 
 # Configurações do Google Cloud
-service_account_info = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+service_account_info = json.loads(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
 CREDENTIALS = service_account.Credentials.from_service_account_info(service_account_info)
 STORAGE_CLIENT = storage.Client(credentials=CREDENTIALS)
 SPEECH_CLIENT = speech.SpeechClient(credentials=CREDENTIALS)
@@ -19,20 +19,20 @@ BUCKET_NAME = "transcricao-videos"  # Nome do bucket
 app = Flask(__name__)
 
 # Token do Hugging Face (inserido diretamente no código)
-HF_TOKEN = "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"
+HF_TOKEN = os.getenv("HF_TOKEN")
 
 # Função: Download do áudio do YouTube
 def download_audio(video_url):
-    """Faz download do áudio de um vídeo do YouTube utilizando yt_dlp e cookies."""
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': '%(title)s.%(ext)s',
-        'cookies': 'cookies.txt'  # Usa o arquivo de cookies
+        'cookiefile': './cookies.txt',  # Caminho relativo ao arquivo cookies.txt
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info_dict = ydl.extract_info(video_url, download=True)
         audio_file = info_dict.get('title', 'downloaded_audio') + '.webm'
     return audio_file
+
 
 # Função: Conversão para WAV
 def convert_to_wav(input_file, target_rate=16000):
@@ -56,7 +56,7 @@ def upload_to_gcs(bucket_name, source_file, destination_blob):
 
 # Função: Transcrição do áudio
 def transcribe_audio(audio_file_path, language_code="pt-BR"):
-    """Transcreve o áudio a partir de um arquivo local."""
+    """Transcreve o áudio a partir de um arquivo local, com suporte para múltiplos idiomas."""
     gcs_uri = upload_to_gcs(BUCKET_NAME, audio_file_path, os.path.basename(audio_file_path))
     audio = speech.RecognitionAudio(uri=gcs_uri)
     config = speech.RecognitionConfig(
@@ -71,10 +71,11 @@ def transcribe_audio(audio_file_path, language_code="pt-BR"):
 
 # Função: Processar perguntas
 def processar_pergunta(transcricao, pergunta):
-    perguntas = {  # Dicionário de respostas simplificado
+    pergunta = pergunta.lower().strip()
+    respostas = {
         "quantas palavras tem o vídeo": f"A transcrição contém {len(transcricao.split())} palavras.",
     }
-    return perguntas.get(pergunta.lower(), "Desculpe, não consegui encontrar uma resposta para sua pergunta.")
+    return respostas.get(pergunta, "Desculpe, não consegui encontrar uma resposta para sua pergunta.")
 
 # Rota para perguntas e respostas
 @app.route('/pergunta', methods=['POST'])
@@ -82,6 +83,7 @@ def responder():
     dados = request.json
     pergunta = dados.get('pergunta')
     video_url = dados.get('video_url')
+    language_code = dados.get('language_code', 'pt-BR')  # Idioma padrão é português
 
     if not pergunta or not video_url:
         return jsonify({"erro": "Pergunta ou URL do vídeo não fornecida"}), 400
@@ -94,7 +96,7 @@ def responder():
         wav_file = convert_to_wav(audio_file)
 
         # Etapa 3: Transcrição do áudio
-        transcricao = transcribe_audio(wav_file)
+        transcricao = transcribe_audio(wav_file, language_code)
 
         # Etapa 4: Processar a pergunta
         resposta = processar_pergunta(transcricao, pergunta)
@@ -105,5 +107,4 @@ def responder():
         return jsonify({"erro": str(e)}), 500
 
 # Inicialização do servidor
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
+if __name__ == '__main__'
