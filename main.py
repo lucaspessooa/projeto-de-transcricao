@@ -24,9 +24,7 @@ nltk.download('punkt')
 nltk.download('stopwords')
 
 # Configurações do Google Cloud
-#app
 KEY_PATH = r"C:\\Users\\LucasPessoa\\Desktop\\projeto\\chaves\\lucas-teste-autenticare-525da8b5645f.json"
-#KEY_PATH = r"/app/lucas-teste-autenticare-525da8b5645f.json"
 CREDENTIALS = service_account.Credentials.from_service_account_file(KEY_PATH)
 STORAGE_CLIENT = storage.Client(credentials=CREDENTIALS)
 SPEECH_CLIENT = speech.SpeechClient(credentials=CREDENTIALS)
