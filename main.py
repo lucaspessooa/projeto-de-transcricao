@@ -23,13 +23,9 @@ verificar_e_instalar(["yt-dlp", "flask", "google-cloud-storage", "google-cloud-s
 nltk.download('punkt')
 nltk.download('stopwords')
 
-# Obter o caminho das credenciais do Google Cloud do ambiente
-GOOGLE_CREDENTIALS_PATH = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-
-if not GOOGLE_CREDENTIALS_PATH:
-    raise Exception("A variável GOOGLE_APPLICATION_CREDENTIALS não está configurada corretamente.")
-
-CREDENTIALS = service_account.Credentials.from_service_account_file(GOOGLE_CREDENTIALS_PATH)
+# Configurações do Google Cloud
+KEY_PATH = r"C:\\Users\\LucasPessoa\\Desktop\\projeto\\chaves\\lucas-teste-autenticare-525da8b5645f.json"
+CREDENTIALS = service_account.Credentials.from_service_account_file(KEY_PATH)
 STORAGE_CLIENT = storage.Client(credentials=CREDENTIALS)
 SPEECH_CLIENT = speech.SpeechClient(credentials=CREDENTIALS)
 BUCKET_NAME = "transcricao-videos"  # Nome do bucket
@@ -123,9 +119,14 @@ def processar_pergunta(transcricao, pergunta):
         "aplicativos de rotas utilizam": "Os aplicativos de rotas cruzam informações de milhões de fontes em tempo real para calcular rotas, avaliar o impacto do trânsito e fornecer trajetos otimizados.",
         "jogos de videogame": "Nos jogos, a inteligência artificial permite que robôs aprendam a jogar, se adaptem às ações dos jogadores e desenvolvam estratégias para atingir seus objetivos.",
         "câmeras de segurança utilizam inteligência artificial": "As câmeras com IA detectam comportamentos anômalos, como alguém pulando um muro, e notificam as autoridades automaticamente.",
-        "como a inteligência artificial ajuda no processamento de grandes volumes de dados": "A inteligência artificial processa grandes volumes de dados identificando padrões, analisando informações em tempo real e extraindo insights relevantes, permitindo decisões mais rápidas e eficientes.",
+        "por que as respostas no google são diferentes para cada pessoa": "As respostas no Google são diferentes porque os buscadores avaliam o comportamento de quem está pesquisando, além de parâmetros como relevância do site e número de acessos, para oferecer respostas personalizadas.",
+        "como os buscadores personalizam as respostas": "Os buscadores personalizam as respostas avaliando o comportamento do usuário, relevância do site, número de acessos e histórico de pesquisa.",
+        "de que forma a inteligência artificial ajuda no processamento de grandes volumes de dados": "A inteligência artificial processa grandes volumes de dados identificando padrões, analisando informações em tempo real e extraindo insights relevantes, permitindo decisões mais rápidas e eficientes.",
+        "como a inteligência artificial melhora o trânsito": "A inteligência artificial melhora o trânsito avaliando informações de milhões de fontes em tempo real, como acidentes e engarrafamentos, para traçar rotas mais rápidas e seguras.",
+        "como a inteligência artificial contribui para melhorar a experiência do usuário em aplicativos": "A inteligência artificial analisa o comportamento do usuário para personalizar interações, prever necessidades e oferecer sugestões relevantes, melhorando a experiência em aplicativos."
     }
 
+    # Verificar se a pergunta está contida no dicionário
     for chave, resposta in respostas.items():
         if chave in pergunta:
             return resposta
@@ -164,6 +165,6 @@ def responder():
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
 
-# Inicializa o servidor
+# Inicialização do servidor
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=10000)
+    app.run(debug=True)
