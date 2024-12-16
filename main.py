@@ -1,37 +1,46 @@
-import json
 import os
-import subprocess
+import json
+import yt_dlp
 from flask import Flask, request, jsonify
 from google.cloud import storage, speech
 from google.oauth2 import service_account
-import yt_dlp
 import nltk
-import requests
 
 # Configurações do Google Cloud
-service_account_info = json.loads(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+with open("C:\\Users\\LucasPessoa\\Desktop\\projeto\\chaves\\lucas-teste-autenticare-525da8b5645f.json", "r") as f:
+    service_account_info = json.load(f)
+
 CREDENTIALS = service_account.Credentials.from_service_account_info(service_account_info)
 STORAGE_CLIENT = storage.Client(credentials=CREDENTIALS)
 SPEECH_CLIENT = speech.SpeechClient(credentials=CREDENTIALS)
-BUCKET_NAME = "transcricao-videos"  # Nome do bucket
+BUCKET_NAME = "transcricao-videos"
 
 # Inicializa o app Flask
 app = Flask(__name__)
 
-# Token do Hugging Face (inserido diretamente no código)
-HF_TOKEN = os.getenv("HF_TOKEN")
 
 # Função: Download do áudio do YouTube
 def download_audio(video_url):
+    # Caminho absoluto para o arquivo cookies.txt
+    cookie_file_path = os.path.abspath("cookies.txt")
+
+    # Debugging: Verificar o caminho e a existência do arquivo
+    print(f"Path para cookies.txt: {cookie_file_path}")
+    print(f"Arquivo cookies.txt existe? {os.path.exists(cookie_file_path)}")
+
+    # Configuração do yt-dlp
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': '%(title)s.%(ext)s',
-        'cookiefile': './cookies.txt',  # Caminho relativo ao arquivo cookies.txt
+        'cookiefile': cookie_file_path  # Usar o arquivo cookies.txt
     }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info_dict = ydl.extract_info(video_url, download=True)
-        audio_file = info_dict.get('title', 'downloaded_audio') + '.webm'
-    return audio_file
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info_dict = ydl.extract_info(video_url, download=True)
+            audio_file = info_dict.get('title', 'downloaded_audio') + '.webm'
+        return audio_file
+    except Exception as e:
+        raise Exception(f"Erro ao baixar áudio: {str(e)}")
 
 
 # Função: Conversão para WAV
@@ -46,17 +55,17 @@ def convert_to_wav(input_file, target_rate=16000):
     subprocess.run(command, check=True)
     return output_file
 
+
 # Função: Upload para GCS
 def upload_to_gcs(bucket_name, source_file, destination_blob):
-    """Faz upload de um arquivo local para o bucket GCS."""
     bucket = STORAGE_CLIENT.bucket(bucket_name)
     blob = bucket.blob(destination_blob)
     blob.upload_from_filename(source_file)
     return f"gs://{bucket_name}/{destination_blob}"
 
+
 # Função: Transcrição do áudio
 def transcribe_audio(audio_file_path, language_code="pt-BR"):
-    """Transcreve o áudio a partir de um arquivo local, com suporte para múltiplos idiomas."""
     gcs_uri = upload_to_gcs(BUCKET_NAME, audio_file_path, os.path.basename(audio_file_path))
     audio = speech.RecognitionAudio(uri=gcs_uri)
     config = speech.RecognitionConfig(
@@ -69,13 +78,14 @@ def transcribe_audio(audio_file_path, language_code="pt-BR"):
     transcript = " ".join(result.alternatives[0].transcript for result in response.results)
     return transcript
 
+
 # Função: Processar perguntas
 def processar_pergunta(transcricao, pergunta):
     pergunta = pergunta.lower().strip()
-    respostas = {
-        "quantas palavras tem o vídeo": f"A transcrição contém {len(transcricao.split())} palavras.",
-    }
-    return respostas.get(pergunta, "Desculpe, não consegui encontrar uma resposta para sua pergunta.")
+    if "quantas palavras" in pergunta:
+        return f"A transcrição contém {len(transcricao.split())} palavras."
+    return "Desculpe, não consegui encontrar uma resposta para sua pergunta."
+
 
 # Rota para perguntas e respostas
 @app.route('/pergunta', methods=['POST'])
@@ -83,7 +93,6 @@ def responder():
     dados = request.json
     pergunta = dados.get('pergunta')
     video_url = dados.get('video_url')
-    language_code = dados.get('language_code', 'pt-BR')  # Idioma padrão é português
 
     if not pergunta or not video_url:
         return jsonify({"erro": "Pergunta ou URL do vídeo não fornecida"}), 400
@@ -96,17 +105,15 @@ def responder():
         wav_file = convert_to_wav(audio_file)
 
         # Etapa 3: Transcrição do áudio
-        transcricao = transcribe_audio(wav_file, language_code)
+        transcricao = transcribe_audio(wav_file)
 
         # Etapa 4: Processar a pergunta
         resposta = processar_pergunta(transcricao, pergunta)
-
         return jsonify({"resposta": resposta})
-
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
 
+
 # Inicialização do servidor
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
-
+    app.run(debug=True)
