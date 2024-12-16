@@ -2,6 +2,7 @@ import os
 import subprocess
 import importlib
 import base64
+import json  # Importação corrigida
 from flask import Flask, request, jsonify
 from google.cloud import storage, speech
 from google.oauth2 import service_account
@@ -24,27 +25,28 @@ verificar_e_instalar(["yt-dlp", "flask", "google-cloud-storage", "google-cloud-s
 nltk.download('punkt')
 nltk.download('stopwords')
 
-# Configurações do Google Cloud usando credenciais em Base64
-GOOGLE_CREDENTIALS_BASE64 = os.getenv("GOOGLE_CREDENTIALS_BASE64")
-
-if not GOOGLE_CREDENTIALS_BASE64:
-    raise Exception("Variável de ambiente GOOGLE_CREDENTIALS_BASE64 não configurada!")
-
-# Decodificar o JSON Base64
+# Configurações do Google Cloud
 try:
-    json_credentials = base64.b64decode(GOOGLE_CREDENTIALS_BASE64).decode("utf-8")
-    CREDENTIALS = service_account.Credentials.from_service_account_info(json.loads(json_credentials))
+    # Carrega as credenciais da variável de ambiente GOOGLE_CREDENTIALS_BASE64
+    json_credentials = os.getenv("GOOGLE_CREDENTIALS_BASE64")
+    if not json_credentials:
+        raise Exception("Variável de ambiente GOOGLE_CREDENTIALS_BASE64 não configurada.")
+
+    # Decodifica as credenciais Base64
+    credentials_json = base64.b64decode(json_credentials).decode("utf-8")
+    CREDENTIALS = service_account.Credentials.from_service_account_info(json.loads(credentials_json))
+
+    STORAGE_CLIENT = storage.Client(credentials=CREDENTIALS)
+    SPEECH_CLIENT = speech.SpeechClient(credentials=CREDENTIALS)
+    BUCKET_NAME = "transcricao-videos"  # Nome do bucket
+
 except Exception as e:
     raise Exception(f"Erro ao carregar credenciais do Google Cloud: {e}")
-
-STORAGE_CLIENT = storage.Client(credentials=CREDENTIALS)
-SPEECH_CLIENT = speech.SpeechClient(credentials=CREDENTIALS)
-BUCKET_NAME = "transcricao-videos"
 
 # Inicializa o app Flask
 app = Flask(__name__)
 
-# Token do Hugging Face
+# Token do Hugging Face (inserido diretamente no código)
 HF_TOKEN = "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"
 
 # Função: Download do áudio do YouTube
@@ -63,8 +65,8 @@ def convert_to_wav(input_file, target_rate=16000):
     output_file = input_file.replace('.webm', '.wav')
     command = [
         "ffmpeg", "-i", input_file,
-        "-ac", "1",
-        "-ar", str(target_rate),
+        "-ac", "1",  # Mono
+        "-ar", str(target_rate),  # Taxa de amostragem
         output_file
     ]
     subprocess.run(command, check=True)
@@ -72,6 +74,7 @@ def convert_to_wav(input_file, target_rate=16000):
 
 # Função: Upload para GCS
 def upload_to_gcs(bucket_name, source_file, destination_blob):
+    """Faz upload de um arquivo local para o bucket GCS."""
     bucket = STORAGE_CLIENT.bucket(bucket_name)
     blob = bucket.blob(destination_blob)
     blob.upload_from_filename(source_file)
@@ -79,6 +82,7 @@ def upload_to_gcs(bucket_name, source_file, destination_blob):
 
 # Função: Transcrição do áudio
 def transcribe_audio(audio_file_path, language_code="pt-BR"):
+    """Transcreve o áudio a partir de um arquivo local, com suporte para múltiplos idiomas."""
     gcs_uri = upload_to_gcs(BUCKET_NAME, audio_file_path, os.path.basename(audio_file_path))
     audio = speech.RecognitionAudio(uri=gcs_uri)
     config = speech.RecognitionConfig(
@@ -94,32 +98,17 @@ def transcribe_audio(audio_file_path, language_code="pt-BR"):
 # Função: Processar perguntas
 def processar_pergunta(transcricao, pergunta):
     pergunta = pergunta.lower().strip()
-
     respostas = {
-        "quantas palavras tem o vídeo": f"A transcrição contém {len(transcricao.split())} palavras.",
-        "inteligência artificial está presente": "A inteligência artificial está presente em aplicativos de rotas como Waze e Google Maps, jogos de videogame, e câmeras de segurança que interpretam cenas e fazem reconhecimento facial.",
-        "aplicativos de rotas utilizam": "Os aplicativos de rotas cruzam informações de milhões de fontes em tempo real para calcular rotas, avaliar o impacto do trânsito e fornecer trajetos otimizados.",
-        "jogos de videogame": "Nos jogos, a inteligência artificial permite que robôs aprendam a jogar, se adaptem às ações dos jogadores e desenvolvam estratégias para atingir seus objetivos.",
-        "câmeras de segurança utilizam inteligência artificial": "As câmeras com IA detectam comportamentos anômalos, como alguém pulando um muro, e notificam as autoridades automaticamente.",
-        "por que as respostas no google são diferentes para cada pessoa": "As respostas no Google são diferentes porque os buscadores avaliam o comportamento de quem está pesquisando, além de parâmetros como relevância do site e número de acessos, para oferecer respostas personalizadas.",
-        "como os buscadores personalizam as respostas": "Os buscadores personalizam as respostas avaliando o comportamento do usuário, relevância do site, número de acessos e histórico de pesquisa.",
-        "de que forma a inteligência artificial ajuda no processamento de grandes volumes de dados": "A inteligência artificial processa grandes volumes de dados identificando padrões, analisando informações em tempo real e extraindo insights relevantes, permitindo decisões mais rápidas e eficientes.",
-        "como a inteligência artificial melhora o trânsito": "A inteligência artificial melhora o trânsito avaliando informações de milhões de fontes em tempo real, como acidentes e engarrafamentos, para traçar rotas mais rápidas e seguras.",
-        "como a inteligência artificial contribui para melhorar a experiência do usuário em aplicativos": "A inteligência artificial analisa o comportamento do usuário para personalizar interações, prever necessidades e oferecer sugestões relevantes, melhorando a experiência em aplicativos."
+        "quantas palavras tem o vídeo": f"A transcrição contém {len(transcricao.split())} palavras."
     }
+    return respostas.get(pergunta, "Desculpe, não consegui encontrar uma resposta para sua pergunta.")
 
-    for chave, resposta in respostas.items():
-        if chave in pergunta:
-            return resposta
-    return "Desculpe, não consegui encontrar uma resposta para sua pergunta."
-
-# Rota principal
+# Rota para perguntas e respostas
 @app.route('/pergunta', methods=['POST'])
 def responder():
     dados = request.json
     pergunta = dados.get('pergunta')
     video_url = dados.get('video_url')
-    language_code = dados.get('language_code', 'pt-BR')
 
     if not pergunta or not video_url:
         return jsonify({"erro": "Pergunta ou URL do vídeo não fornecida"}), 400
@@ -127,7 +116,7 @@ def responder():
     try:
         audio_file = download_audio(video_url)
         wav_file = convert_to_wav(audio_file)
-        transcricao = transcribe_audio(wav_file, language_code)
+        transcricao = transcribe_audio(wav_file)
         resposta = processar_pergunta(transcricao, pergunta)
         return jsonify({"resposta": resposta})
     except Exception as e:
